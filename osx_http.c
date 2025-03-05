@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <unistd.h>
 
 #define true 1
 #define false 0
@@ -12,7 +13,7 @@ typedef uint64_t u64;
 
 int main(void)
 {
-    sockaddr_in address = {};
+    struct sockaddr_in address = {};
     address.sin_port = htons(3000); // sin_port type is u16 (short)
     address.sin_addr.s_addr = htonl(INADDR_ANY); // sin_addr.s_addr type is u32 (long)
     address.sin_family = AF_INET;
@@ -21,7 +22,7 @@ int main(void)
 
     if(server_socket != -1)
     {
-        if(bind(server_socket, (sockaddr *)&address, sizeof(address)) != -1)
+        if(bind(server_socket, (struct sockaddr *)&address, sizeof(address)) != -1)
         {
             if(listen(server_socket, 10) != -1)
             {
@@ -36,7 +37,7 @@ int main(void)
                 {
                     puts("===== WAITING FOR CONNECTION =====");
 
-                    new_socket = accept(server_socket, (sockaddr *)&address, 
+                    new_socket = accept(server_socket, (struct sockaddr *)&address, 
                                         &address_length);
 
                     recv(new_socket, buffer, RECV_BUFFER_SIZE, 0);
@@ -44,13 +45,13 @@ int main(void)
 
                     send(new_socket, hello, strlen(hello), 0);
 
-                    shutdown(new_socket, SD_SEND);
-                    closesocket(new_socket);
+                    shutdown(new_socket, SHUT_WR);
+                    close(new_socket);
                 }
             }
         }
     }
 
-    closesocket(server_socket);
+    close(server_socket);
     return 0;
 }
