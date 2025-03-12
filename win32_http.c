@@ -1,66 +1,104 @@
+#include "http.h"
+
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <memoryapi.h>
+
+#include "win32_http.h"
+#include "http.c"
 
 #pragma comment(lib, "Ws2_32.lib")
 
-#define true 1
-#define false 0
-typedef uint64_t u64;
-
-int main(void)
+static b32
+win32_server_init_bind_and_listen(Win32_Server *server)
 {
-    // NOTE(manuel): In windows, we need to do this in order to access tcp functionality
-    WSADATA wsa_data;
-    if(WSAStartup(MAKEWORD(2,2), &wsa_data)) { return 1; };
+    b32 result = false;
 
-    struct sockaddr_in address = {};
-    address.sin_port = htons(3000); // sin_port type is u16 (short)
-    address.sin_addr.s_addr = htonl(INADDR_ANY); // sin_addr.s_addr type is u32 (long)
-    address.sin_family = AF_INET;
+    server->address.sin_family = server->domain;
+    server->address.sin_port = htons(server->port);
+    server->address.sin_addr.s_addr = htonl(server->addr_interface);
 
-    // Finns den typ av dörr jag vill ha?
-    u64 server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    server->socket = socket(server->domain, server->service, server->protocol);
 
-    if(server_socket != INVALID_SOCKET)
+    if(server->socket != INVALID_SOCKET)
     {
-        // Sätt in dörren i en byggnad
-        if(bind(server_socket, (struct sockaddr *)&address, sizeof(address)) != SOCKET_ERROR)
+        if(bind(server->socket, (struct sockaddr *)&server->address,
+                sizeof(server->address)) != SOCKET_ERROR)
         {
-            // Ställ dig vid dörren och invänta meddelanden
-            if(listen(server_socket, 10) != SOCKET_ERROR)
+            if(listen(server->socket, server->backlog) != SOCKET_ERROR)
             {
-
-                #define RECV_BUFFER_SIZE 512
-                char buffer[RECV_BUFFER_SIZE];
-                const char *hello = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: 63\r\nConnection: close\r\n\r\n<!DOCTYPE html><html><body><h1>Hello, World!</h1></body></html>";
-
-                int address_length = sizeof(address);
-                u64 new_socket;
-
-                while(true)
-                {
-                    puts("===== WAITING FOR CONNECTION =====");
-
-                    new_socket = accept(server_socket, (struct sockaddr *)&address, 
-                                        &address_length);
-
-                    recv(new_socket, buffer, RECV_BUFFER_SIZE, 0);
-                    printf("Message they sent:\n%s\n", buffer);
-
-                    send(new_socket, hello, strlen(hello), 0);
-
-                    shutdown(new_socket, SD_SEND);
-                    closesocket(new_socket);
-                }
+                result = true;
             }
-
+            else
+            {
+                fprintf(stderr, "ERROR: failed to start listening...\n");
+            }
+        }
+        else
+        {
+            fprintf(stderr, "ERROR: failed to bind socket...\n");
         }
     }
+    else
+    {
+        fprintf(stderr, "ERROR: failed to connect socket...\n");
+    }
 
-    closesocket(server_socket);
+    return result;
+}
+
+static void
+win32_server_launch(Win32_Server server)
+{
+
+    #define RECV_BUFFER_SIZE 2048
+    char *buffer = VirtualAlloc(0, RECV_BUFFER_SIZE, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+
+    s32 address_length = sizeof(server.address);
+    s64 new_socket;
+
+    while(true)
+    {
+
+        puts("===== WAITING FOR CONNECTION =====");
+        new_socket = accept(server.socket, (struct sockaddr *) &server.address, 
+                                &address_length);
+        recv(new_socket, buffer, RECV_BUFFER_SIZE, 0);
+
+        char *response = http_handle_request(buffer);
+
+        send(new_socket, response, strlen(response), 0);
+        shutdown(new_socket, SD_SEND);
+        closesocket(new_socket);
+    }
+}
+
+s32 main() 
+{
+
+
+    WSADATA wsa_data;
+    if(WSAStartup(MAKEWORD(2,2), &wsa_data) == 0)
+    {
+        Win32_Server server = 
+        {
+            .domain = AF_INET,
+            .service = SOCK_STREAM,
+            .protocol = 0, 
+            .addr_interface = INADDR_ANY, 
+            .port = 3000, 
+            .backlog = 10,
+        };
+
+        if(win32_server_init_bind_and_listen(&server))
+        {
+            win32_server_launch(server);
+        }
+        closesocket(server.socket);
+    }
     WSACleanup();
     return 0;
 }
